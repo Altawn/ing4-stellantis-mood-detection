@@ -5,3 +5,37 @@ mediapipe/provisioning_profile.mobileprovision
 node_modules/
 .configure.bazelrc
 .user.bazelrc
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git-rewrite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific - Exclude MediaPipe source code
+# On utilise MediaPipe via pip, donc pas besoin du code source
+mediapipe/
+
+# Fichiers temporaires du projet
+test_installation.py
+verification/
