@@ -2,6 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import math
+import time
+from collections import deque
 
 # Initialisation des modules MediaPipe
 mp_face_mesh = mp.solutions.face_mesh
@@ -65,6 +67,22 @@ def calculate_brow_inclination(landmarks, scale_ref):
     sensitivity = 0.08 
     return max(-1.0, min(1.0, avg_slope / (sensitivity * scale_ref)))
 
+def calculate_brow_eye_distance(landmarks, scale_ref):
+    """
+    Calcule la distance moyenne entre le coin intérieur de l'oeil et le coin intérieur du sourcil.
+    Cette mesure est plus robuste à l'inclinaison de la tête (pitch) que la pente brute.
+    Plus petit = plus énervé (sourcils froncés vers le bas).
+    """
+    # Indices:
+    # Left Eye Inner: 362, Left Eyebrow Inner: 55
+    # Right Eye Inner: 133, Right Eyebrow Inner: 285
+    
+    l_dist = calculate_distance(landmarks[362], landmarks[55])
+    r_dist = calculate_distance(landmarks[133], landmarks[285])
+    
+    avg_dist = (l_dist + r_dist) / 2.0
+    return avg_dist / scale_ref
+
 def calculate_smile_score(landmarks, scale_ref):
     """
     Calcule un score de sourire basé sur la position des coins de la bouche par rapport au centre.
@@ -90,8 +108,50 @@ def calculate_smile_score(landmarks, scale_ref):
     
     return raw_score + sensitivity_bias
 
+def draw_metric_lines(image, landmarks, indices, w_img, h_img, color=(0, 255, 0)):
+    """Dessine les lignes verticales et horizontales pour EAR/MAR."""
+    # Points according to calculate_ratio_6_points: p1..p6
+    # indices: [p1, p2, p3, p4, p5, p6]
+    # Vertical lines: p2-p6, p3-p5
+    # Horizontal line: p1-p4
+    
+    ps = [landmarks[i] for i in indices]
+    coords = [(int(p.x * w_img), int(p.y * h_img)) for p in ps]
+    
+    # Verticals
+    cv2.line(image, coords[1], coords[5], color, 1)
+    cv2.line(image, coords[2], coords[4], color, 1)
+    # Horizontal
+    cv2.line(image, coords[0], coords[3], color, 1)
+
+# Configuration de la capture vidéo
 # Configuration de la capture vidéo
 cap = cv2.VideoCapture(0)
+
+# --- VARIABLES ETAT & CALIBRATION ---
+CALIBRATION_DURATION = 5.0 # secondes (Augmenté pour mieux s'adapter)
+calibration_start_time = None
+is_calibrating = True
+calib_brow_vals = []
+calib_smile_vals = []
+calib_brow_dist_vals = [] # Nouveau pour la distance
+
+# Valeurs de référence (seront mises à jour après calibration)
+ref_brow_neutral = 0.0
+ref_smile_neutral = 0.0
+ref_brow_dist_neutral = 0.0
+
+# Lissage (Smoothing)
+alpha = 0.2 # Facteur de lissage (0 < alpha <= 1). Plus petit = plus lisse.
+smooth_brow = 0.0
+smooth_smile = 0.0
+smooth_brow_dist = 0.0
+
+# State Stability
+current_state = "NEUTRE"
+potential_state = "NEUTRE"
+state_start_time = 0.0
+STATE_DURATION_THRESHOLD = 0.3 # secondes
 
 with mp_face_mesh.FaceMesh(
     max_num_faces=1,
@@ -129,40 +189,113 @@ with mp_face_mesh.FaceMesh(
         right_ear = calculate_ratio_6_points(landmarks, RIGHT_EYE)
         avg_ear = (left_ear + right_ear) / 2.0
         mar = calculate_ratio_6_points(landmarks, MOUTH)
-        brow_score = calculate_brow_inclination(landmarks, eye_span)
+        brow_score = calculate_brow_inclination(landmarks, eye_span) # Gardé pour info mais on utilise la distance
+        brow_dist_score = calculate_brow_eye_distance(landmarks, eye_span)
         smile_score = calculate_smile_score(landmarks, eye_span)
 
-        # --- LOGIQUE D'ÉTAT ---
-        state = "NEUTRE"
-        color = (255, 255, 0) # Cyan pour neutre
+        rel_brow = 0.0
+        rel_smile = 0.0
+        rel_brow_dist = 0.0
 
-        # Priorité : Énervé > Content > Neutre
-        # Seuils ajustables
-        if brow_score < -0.3:
-            state = "ENERVE"
-            color = (0, 0, 255) # Rouge
-        elif smile_score > 0.03: # Seuil bas pour détecter les petits sourires
-            state = "CONTENT"
-            color = (0, 255, 0) # Vert
-        
+        # --- CALIBRATION LOGIC ---
+        if is_calibrating:
+            if calibration_start_time is None:
+                calibration_start_time = time.time()
+            
+            elapsed = time.time() - calibration_start_time
+            remaining =  max(0, CALIBRATION_DURATION - elapsed)
+            
+            # Affichage compte à rebours
+            cv2.putText(image, f"CALIBRATION: VISAGE NEUTRE ({remaining:.1f}s)", (30, 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+            
+            # Collecte des données
+            calib_brow_vals.append(brow_score)
+            calib_smile_vals.append(smile_score)
+            calib_brow_dist_vals.append(brow_dist_score)
+            
+            if elapsed >= CALIBRATION_DURATION:
+                is_calibrating = False
+                if calib_brow_vals:
+                    ref_brow_neutral = sum(calib_brow_vals) / len(calib_brow_vals)
+                    ref_smile_neutral = sum(calib_smile_vals) / len(calib_smile_vals)
+                    ref_brow_dist_neutral = sum(calib_brow_dist_vals) / len(calib_brow_dist_vals)
+                print(f"Calibration Done! Ref Brow Dist: {ref_brow_dist_neutral:.3f}, Ref Smile: {ref_smile_neutral:.3f}")
+
+            # Pendant la calibration, on ne change pas d'état visuel
+            state = "CALIBRATION"
+            color = (128, 128, 128)
+            
+        else:
+            # --- CALCULS LISSÉS & RELATIFS ---
+            # Lissage Exponentiel
+            smooth_brow = alpha * brow_score + (1 - alpha) * smooth_brow
+            smooth_smile = alpha * smile_score + (1 - alpha) * smooth_smile
+            smooth_brow_dist = alpha * brow_dist_score + (1 - alpha) * smooth_brow_dist
+            
+            # Valeurs relatives à la calibration
+            rel_brow = smooth_brow - ref_brow_neutral
+            rel_smile = smooth_smile - ref_smile_neutral
+            rel_brow_dist = smooth_brow_dist - ref_brow_dist_neutral
+    
+            # --- LOGIQUE D'ÉTAT PROVISOIRE ---
+            detected_state = "NEUTRE"
+            detected_color = (255, 255, 0) # Cyan pour neutre
+
+            # Seuils ajustés sur le relatif
+            # Angry detection based on BROW DISTANCE now
+            # Si distance diminue -> Froncement -> Angry
+            # Threshold experimental: -0.02 (depends on metric scale)
+            
+            if rel_brow_dist < -0.015: # Seuil distance sourcil-oeil (plus robuste au pitch)
+                detected_state = "ENERVE"
+                detected_color = (0, 0, 255) # Rouge
+            elif rel_smile > 0.02: 
+                detected_state = "CONTENT"
+                detected_color = (0, 255, 0) # Vert
+            
+            # --- STABILITE TEMPORELLE ---
+            if detected_state == potential_state:
+                # Si l'état détecté est le même que le potentiel, on incrémente le temps
+                if time.time() - state_start_time > STATE_DURATION_THRESHOLD:
+                     current_state = detected_state
+                     if current_state == "ENERVE": color = (0, 0, 255)
+                     elif current_state == "CONTENT": color = (0, 255, 0)
+                     else: color = (255, 255, 0)
+            else:
+                # Changement de candidat -> Reset timer
+                potential_state = detected_state
+                state_start_time = time.time()
+                
+            # Fallback color for display if state hasn't changed yet
+            if current_state == "ENERVE": color = (0, 0, 255)
+            elif current_state == "CONTENT": color = (0, 255, 0)
+            else: color = (255, 255, 0)
+                
         # --- AFFICHAGE ---
-        # Texte
-        cv2.putText(image, f'Etat: {state}', (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
+        if not is_calibrating:
+             cv2.putText(image, f'Etat: {current_state}', (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
         
         # Debug values (plus petit)
-        cv2.putText(image, f'Brow: {brow_score:.2f} | Smile: {smile_score:.2f}', (30, 90), 
+        cv2.putText(image, f'B-Dist: {smooth_brow_dist:.3f} (Rel: {rel_brow_dist:.3f})', (30, 90), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        cv2.putText(image, f'EAR: {avg_ear:.2f} | MAR: {mar:.2f}', (30, 110), 
+        cv2.putText(image, f'Smile: {smile_score:.2f} (Rel: {rel_smile:.2f})', (30, 110), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        cv2.putText(image, f'EAR: {avg_ear:.2f} | MAR: {mar:.2f}', (30, 130), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         # --- DESSIN DES POINTS (Pas de contours, juste des points) ---
+        # --- DESSIN DES LIGNES (EAR / MAR) ---
+        draw_metric_lines(image, landmarks, LEFT_EYE, w_img, h_img, (0, 255, 255))
+        draw_metric_lines(image, landmarks, RIGHT_EYE, w_img, h_img, (0, 255, 255))
+        draw_metric_lines(image, landmarks, MOUTH, w_img, h_img, (0, 100, 255))
+        
+        # --- DESSIN DES POINTS (Optionnel: Tous les points) ---
         for idx in ALL_POINTS:
             pt = landmarks[idx]
             x = int(pt.x * w_img)
             y = int(pt.y * h_img)
-            # Couleur du point dépend de la zone ? Ou uniforme.
-            # Faisons simple : Blanc
-            cv2.circle(image, (x, y), 2, (255, 255, 255), -1)
+            cv2.circle(image, (x, y), 1, (255, 255, 255), -1)
 
     cv2.imshow('MediaPipe Face Analysis', image)
     
