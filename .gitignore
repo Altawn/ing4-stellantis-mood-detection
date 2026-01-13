@@ -1,0 +1,40 @@
+# Common
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+.env
+.DS_Store
+dist/
+build/
+*.log
+.vscode/
+.idea/
+.next/
+out/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Bazel (MediaPipe legacy)
+bazel-*
+.configure.bazelrc
+.user.bazelrc
