@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 # Mock sounddevice to avoid PortAudio initialization error on Windows
 sys.modules['sounddevice'] = MagicMock()
 import mediapipe as mp
-import numpy as np
+import numpy 
 import math
 import time
 
