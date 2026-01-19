@@ -1,4 +1,8 @@
 import cv2
+import sys
+from unittest.mock import MagicMock
+# Mock sounddevice to avoid PortAudio initialization error on Windows
+sys.modules['sounddevice'] = MagicMock()
 import mediapipe as mp
 import numpy as np
 import math
@@ -50,7 +54,7 @@ def calcul_EAR_MAR(p_obj, i):
     h = calcul_distance(p_obj[i[0]], p_obj[i[3]])
 
     # Formule standard: moyenne des hauteurs divisée par la largeur
-    return h == 0 ? 0 : (v1 + v2) / (2.0 * h)
+    return (v1 + v2) / (2.0 * h) if h != 0 else 0.0
 
 """
 Calcule l'inclinaison des sourcils.
@@ -115,7 +119,7 @@ class FaceAnalyzer:
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=1,                # On n'analyse qu'un seul visage
-            refine_p_obj=True,          # Active le suivi précis (iris, lèvres)
+            refine_landmarks=True,          # Active le suivi précis (iris, lèvres)
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
@@ -163,8 +167,8 @@ class FaceAnalyzer:
         h_img, w_img, _ = image.shape
         metrics = {}
 
-        if results.multi_face_p_obj:
-            for face_p_obj in results.multi_face_p_obj:
+        if results.multi_face_landmarks:
+            for face_p_obj in results.multi_face_landmarks:
                 p_obj = face_p_obj.landmark
                 
                 # Référence de taille : distance entre les deux coins externes des yeux
