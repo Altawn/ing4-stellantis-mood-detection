@@ -4,252 +4,190 @@ import numpy as np
 import math
 import time
 
-# --- INDICES DES LANDMARKS (Points de repère) ---
-# Yeux (6 points par oeil pour le EAR)
+# --- INDICES DES p_obj (Points de repère MediaPipe Face Mesh) ---
+# MediaPipe fournit 468 (ou 478 avec iris) points en 3D sur le visage.
+# On utilise des indices spécifiques pour calculer des ratios de distance.
+
+# Yeux (6 points par oeil pour le calcul de l'EAR - Eye Aspect Ratio)
+# Ces points permettent de mesurer l'ouverture de l'oeil.
 LEFT_EYE = [362, 385, 387, 263, 373, 380] 
 RIGHT_EYE = [33, 160, 158, 133, 153, 144]
 
-# Bouche (6 points pour le MAR)
+# Bouche (6 points pour le MAR - Mouth Aspect Ratio)
+# Utilisé pour détecter l'ouverture de la bouche.
 MOUTH = [61, 37, 267, 291, 314, 84]
-# Points supplémentaires pour le sourire
-MOUTH_CORNERS = [61, 291]
-MOUTH_CENTER_TOP = 0
-MOUTH_CENTER_BOTTOM = 17
 
-# Sourcils
-LEFT_EYEBROW_EXTREMES = [55, 46] # [Inner, Outer]
-RIGHT_EYEBROW_EXTREMES = [285, 276] # [Inner, Outer]
+# Points supplémentaires pour détecter le sourire
+MOUTH_CORNERS = [61, 291] # Coins des lèvres
+MOUTH_CENTER_TOP = 0       # Milieu lèvre supérieure
+MOUTH_CENTER_BOTTOM = 17   # Milieu lèvre inférieure
 
+# Sourcils (utilisés pour détecter la colère/froncement)
+LEFT_EYEBROW_EXTREMES = [55, 46]   # [Intérieur, Extérieur]
+RIGHT_EYEBROW_EXTREMES = [285, 276] # [Intérieur, Extérieur]
+
+# Liste regroupant tous les points d'intérêt pour affichage ou calcul groupé
 ALL_POINTS = LEFT_EYE + RIGHT_EYE + MOUTH + LEFT_EYEBROW_EXTREMES + RIGHT_EYEBROW_EXTREMES
 
-def calculate_distance(p1, p2):
-    x1, y1 = p1.x, p1.y
-    x2, y2 = p2.x, p2.y
-    return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+"""Calcule la distance euclidienne entre deux points (x, y) normalisés."""
+def calcul_distance(p1, p2):
+    return math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2)
 
-def calculate_ratio_6_points(landmarks, indices):
-    p1 = landmarks[indices[0]]
-    p2 = landmarks[indices[1]]
-    p3 = landmarks[indices[2]]
-    p4 = landmarks[indices[3]]
-    p5 = landmarks[indices[4]]
-    p6 = landmarks[indices[5]]
+"""
+Calcule le ratio d'aspect (EAR pour yeux, MAR pour bouche).
+Le ratio compare la hauteur moyenne des points verticaux par rapport à la largeur.
+Si le ratio diminue, l'oeil se ferme. Si le MAR augmente, la bouche s'ouvre.
+"""
+def calcul_EAR_MAR(p_obj, i):
 
-    v1 = calculate_distance(p2, p6)
-    v2 = calculate_distance(p3, p5)
-    h = calculate_distance(p1, p4)
+    # Distance verticale - Haut 1 et Bas 2
+    v1 = calcul_distance(p_obj[i[1]], p_obj[i[5]])
 
-    if h == 0: return 0
-    return (v1 + v2) / (2.0 * h)
+    # Distance verticale - Haut 2 et Bas 1
+    v2 = calcul_distance(p_obj[i[2]], p_obj[i[4]])
 
-def calculate_brow_inclination(landmarks, scale_ref):
-    l_inner = landmarks[LEFT_EYEBROW_EXTREMES[0]]
-    l_outer = landmarks[LEFT_EYEBROW_EXTREMES[1]]
-    r_inner = landmarks[RIGHT_EYEBROW_EXTREMES[0]]
-    r_outer = landmarks[RIGHT_EYEBROW_EXTREMES[1]]
+    # Distance horizontale - Coin gauche et Coin droit
+    h = calcul_distance(p_obj[i[0]], p_obj[i[3]])
 
-    l_slope = l_outer.y - l_inner.y
-    r_slope = r_outer.y - r_inner.y
+    # Formule standard: moyenne des hauteurs divisée par la largeur
+    return h == 0 ? 0 : (v1 + v2) / (2.0 * h)
+
+"""
+Calcule l'inclinaison des sourcils.
+Plus le score est négatif, plus les sourcils pointent vers le bas (froncement).
+"""
+def calculate_brow_inclination(p_obj, scale_ref):
+    
+    # Distance intérieur extérieur
+    l_slope = p_obj[LEFT_EYEBROW_EXTREMES[1]].y - p_obj[LEFT_EYEBROW_EXTREMES[0]].y
+    r_slope = p_obj[RIGHT_EYEBROW_EXTREMES[1]].y - p_obj[RIGHT_EYEBROW_EXTREMES[0]].y
     avg_slope = (l_slope + r_slope) / 2.0
 
+    # Normalisation par rapport à la taille du visage (scale_ref)
     sensitivity = 0.08 
     return max(-1.0, min(1.0, avg_slope / (sensitivity * scale_ref)))
 
-def calculate_brow_eye_distance(landmarks, scale_ref):
-    l_dist = calculate_distance(landmarks[362], landmarks[55])
-    r_dist = calculate_distance(landmarks[133], landmarks[285])
+def calculate_brow_eye_distance(p_obj, scale_ref):
+    """
+    Calcule la distance entre les sourcils et les yeux.
+    Une réduction de cette distance est souvent signe de colère ou de concentration intense.
+    """
+    # Distance entre le coin interne de l'oeil et le coin interne du sourcil
+    l_dist = calcul_distance(p_obj[362], p_obj[55])
+    r_dist = calcul_distance(p_obj[133], p_obj[285])
     avg_dist = (l_dist + r_dist) / 2.0
     return avg_dist / scale_ref
 
-def calculate_smile_score(landmarks, scale_ref):
-    corner_l = landmarks[MOUTH_CORNERS[0]]
-    corner_r = landmarks[MOUTH_CORNERS[1]]
-    center_top = landmarks[MOUTH_CENTER_TOP]
+def calculate_smile_score(p_obj, scale_ref):
+    """
+    Détecte le sourire en mesurant l'élévation des coins de la bouche 
+    par rapport au centre de la lèvre supérieure.
+    """
+    corner_l = p_obj[MOUTH_CORNERS[0]]
+    corner_r = p_obj[MOUTH_CORNERS[1]]
+    center_top = p_obj[MOUTH_CENTER_TOP]
     
+    # Moyenne de la hauteur des coins
     avg_corner_y = (corner_l.y + corner_r.y) / 2.0
+    # Différence avec le centre (si les coins montent, diff augmente positivement car y descend)
+    # Attention: en image y=0 est en haut, donc si un point monte, son y diminue.
     diff = center_top.y - avg_corner_y
     raw_score = diff / scale_ref
+    
     sensitivity_bias = 0.02 
     return raw_score + sensitivity_bias
 
-def draw_metric_lines(image, landmarks, indices, w_img, h_img, color=(0, 255, 0)):
-    ps = [landmarks[i] for i in indices]
+def draw_metric_lines(image, p_obj, indices, w_img, h_img, color=(0, 255, 0)):
+    """Dessine les lignes de mesure sur l'image (pour le debug/feedback visuel)."""
+    ps = [p_obj[i] for i in indices]
     coords = [(int(p.x * w_img), int(p.y * h_img)) for p in ps]
     
+    # Dessine les segments verticaux et le segment horizontal
     cv2.line(image, coords[1], coords[5], color, 1)
     cv2.line(image, coords[2], coords[4], color, 1)
     cv2.line(image, coords[0], coords[3], color, 1)
 
 class FaceAnalyzer:
+    """Classe principale pour gérer le mesh facial et l'analyse d'émotions."""
+    
     def __init__(self):
-        # Try to use the classic `mp.solutions.face_mesh` API.
-        # If not available, try to use the newer MediaPipe Tasks API (FaceLandmarker).
-        # If neither works, fall back to a dummy analyzer.
-        self.use_dummy = False
-        self.use_tasks_api = False
-        try:
-            self.mp_face_mesh = mp.solutions.face_mesh
-            self.face_mesh = self.mp_face_mesh.FaceMesh(
-                max_num_faces=1,
-                refine_landmarks=True,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
-            )
-            self.use_tasks_api = False
-        except Exception:
-            # Try Tasks API
-            try:
-                import os
-                import urllib.request
-                # Use the higher-level vision API which provides factory helpers
-                from mediapipe.tasks.python import vision as mp_vision
-                from mediapipe.tasks.python.vision.core import image as mp_image
+        # Initialisation de MediaPipe Face Mesh
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            max_num_faces=1,                # On n'analyse qu'un seul visage
+            refine_p_obj=True,          # Active le suivi précis (iris, lèvres)
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
 
-                # Ensure model file exists locally (download from MediaPipe assets if needed)
-                model_dir = os.path.join(os.path.dirname(__file__), 'models')
-                os.makedirs(model_dir, exist_ok=True)
-                model_asset_name = 'face_landmarker_v2.task'
-                model_path = os.path.join(model_dir, model_asset_name)
-                if not os.path.exists(model_path):
-                    try:
-                        url = 'https://storage.googleapis.com/mediapipe-assets/face_landmarker_v2.task'
-                        print(f"Downloading face landmarker model to {model_path}...")
-                        urllib.request.urlretrieve(url, model_path)
-                        print('Model downloaded')
-                    except Exception as dl_e:
-                        print('Failed to download model asset:', dl_e)
-                        raise
-
-                base_options = mp_vision.BaseOptions(model_asset_path=model_path)
-                # Use IMAGE running mode and create options
-                try:
-                    options = mp_vision.FaceLandmarkerOptions(
-                        base_options=base_options,
-                        num_faces=1,
-                        min_detection_confidence=0.5,
-                        running_mode=mp_vision.RunningMode.IMAGE
-                    )
-                except Exception:
-                    # Fallback without running_mode
-                    options = mp_vision.FaceLandmarkerOptions(
-                        base_options=base_options,
-                        num_faces=1,
-                        min_detection_confidence=0.5
-                    )
-
-                try:
-                    self.face_landmarker = mp_vision.FaceLandmarker.create_from_options(options)
-                except Exception as e_create:
-                    print('FaceLandmarker.create_from_options failed:', e_create)
-                    raise
-
-                self.mp_tasks_image = mp_image.Image
-                self.use_tasks_api = True
-            except Exception:
-                print("mediapipe 'solutions' API not available — using dummy analyzer")
-                self.use_dummy = True
-        
-        # State & Calibration
+        # Paramètres de Calibration
+        # Le système a besoin de 5 secondes de visage "neutre" pour établir une référence.
         self.CALIBRATION_DURATION = 5.0
         self.calibration_start_time = None
         self.is_calibrating = True
+        
+        # Stockage des valeurs pendant la calibration pour faire une moyenne
         self.calib_brow_vals = []
         self.calib_smile_vals = []
         self.calib_brow_dist_vals = []
         
+        # Valeurs de référence (le "neutre" de l'utilisateur)
         self.ref_brow_neutral = 0.0
         self.ref_smile_neutral = 0.0
         self.ref_brow_dist_neutral = 0.0
         
-        # Smoothing
+        # Paramètres de Lissage (Exponential Moving Average)
+        # alpha = 0.2 signifie que la nouvelle valeur compte pour 20%, l'ancienne pour 80%
+        # Cela évite que l'affichage "saute" si les points bougent un peu.
         self.alpha = 0.2
         self.smooth_brow = 0.0
         self.smooth_smile = 0.0
         self.smooth_brow_dist = 0.0
         
-        # State Stability
+        # Gestion de la stabilité des états (Hystérésis)
+        # On ne change d'état que si la détection est stable pendant X secondes.
         self.current_state = "NEUTRE"
         self.potential_state = "NEUTRE"
         self.state_start_time = 0.0
-        self.STATE_DURATION_THRESHOLD = 0.3
+        self.STATE_DURATION_THRESHOLD = 0.3 # 300ms de stabilité requis
 
     def process(self, image):
-        if getattr(self, 'use_dummy', False):
-            return image, {'emotion': 'NEUTRE'}
-
-        # If using Tasks API
-        if getattr(self, 'use_tasks_api', False):
-            try:
-                # Convert BGR->RGB and to Tasks Image
-                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                mp_img = self.mp_tasks_image.create_from_array(image_rgb)
-
-                # Detect
-                result = self.face_landmarker.detect(mp_img)
-
-                # Create a minimal results-like structure for compatibility
-                multi_face_landmarks = None
-                if hasattr(result, 'face_landmarks') and result.face_landmarks:
-                    multi_face_landmarks = []
-                    for fl in result.face_landmarks:
-                        # fl is a NormalizedLandmarkList-like object with .landmark
-                        lm_list = []
-                        if hasattr(fl, 'landmark'):
-                            for lm in fl.landmark:
-                                # Each lm has x,y (normalized)
-                                class LM:
-                                    pass
-                                p = LM()
-                                p.x = lm.x
-                                p.y = lm.y
-                                lm_list.append(p)
-                        multi_face_landmarks.append(type('Face', (), {'landmark': lm_list}))
-
-                # Now set up a pseudo-results object to reuse existing logic
-                class Results:
-                    pass
-                results = Results()
-                results.multi_face_landmarks = multi_face_landmarks
-
-            except Exception as e:
-                print('Tasks API face_landmarker failed:', e)
-                return image, {'emotion': 'NEUTRE'}
-
-            image.flags.writeable = True
-        else:
-            # Classic FaceMesh
-            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            image_rgb.flags.writeable = False
-            results = self.face_mesh.process(image_rgb)
-            image_rgb.flags.writeable = True
-
-        # image stays BGR for drawing if we want, but we should return RGB or BGR? 
-        # Usually frontend expects image to display.
+        """Fonction principale traitant une frame image."""
+        
+        # Conversion BGR (OpenCV) vers RGB (MediaPipe)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb.flags.writeable = False # Optimisation performance
+        results = self.face_mesh.process(image_rgb)
+        image_rgb.flags.writeable = True
         
         h_img, w_img, _ = image.shape
-        
         metrics = {}
 
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                landmarks = face_landmarks.landmark
+        if results.multi_face_p_obj:
+            for face_p_obj in results.multi_face_p_obj:
+                p_obj = face_p_obj.landmark
                 
-                eye_span = calculate_distance(landmarks[33], landmarks[263])
+                # Référence de taille : distance entre les deux coins externes des yeux
+                # Permet de rendre les calculs indépendants de la distance caméra/visage.
+                eye_span = calcul_distance(p_obj[33], p_obj[263])
                 if eye_span == 0: eye_span = 1
                 
-                brow_score = calculate_brow_inclination(landmarks, eye_span)
-                brow_dist_score = calculate_brow_eye_distance(landmarks, eye_span)
-                smile_score = calculate_smile_score(landmarks, eye_span)
+                # Calcul des scores bruts
+                brow_score = calculate_brow_inclination(p_obj, eye_span)
+                brow_dist_score = calculate_brow_eye_distance(p_obj, eye_span)
+                smile_score = calculate_smile_score(p_obj, eye_span)
                 
-                left_ear = calculate_ratio_6_points(landmarks, LEFT_EYE)
-                right_ear = calculate_ratio_6_points(landmarks, RIGHT_EYE)
+                # Calcul des ratios pour les clignements et la bouche (optionnel pour l'instant)
+                left_ear = calcul_EAR_MAR(p_obj, LEFT_EYE)
+                right_ear = calcul_EAR_MAR(p_obj, RIGHT_EYE)
                 avg_ear = (left_ear + right_ear) / 2.0
-                mar = calculate_ratio_6_points(landmarks, MOUTH)
+                mar = calcul_EAR_MAR(p_obj, MOUTH)
 
                 rel_brow = 0.0
                 rel_smile = 0.0
                 rel_brow_dist = 0.0
                 
+                # --- PHASE DE CALIBRATION ---
                 if self.is_calibrating:
                     if self.calibration_start_time is None:
                         self.calibration_start_time = time.time()
@@ -257,67 +195,80 @@ class FaceAnalyzer:
                     elapsed = time.time() - self.calibration_start_time
                     remaining = max(0, self.CALIBRATION_DURATION - elapsed)
                     
+                    # Message d'instruction à l'écran
                     cv2.putText(image, f"CALIBRATION: VISAGE NEUTRE ({remaining:.1f}s)", (30, 50), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
                     
+                    # Accumulation des données
                     self.calib_brow_vals.append(brow_score)
                     self.calib_smile_vals.append(smile_score)
                     self.calib_brow_dist_vals.append(brow_dist_score)
                     
+                    # Fin de calibration
                     if elapsed >= self.CALIBRATION_DURATION:
                         self.is_calibrating = False
                         if self.calib_brow_vals:
                             self.ref_brow_neutral = sum(self.calib_brow_vals) / len(self.calib_brow_vals)
                             self.ref_smile_neutral = sum(self.calib_smile_vals) / len(self.calib_smile_vals)
                             self.ref_brow_dist_neutral = sum(self.calib_brow_dist_vals) / len(self.calib_brow_dist_vals)
-                        print(f"Calibration Done! Refs: {self.ref_brow_neutral}, {self.ref_smile_neutral}")
+                        print(f"Calibration Terminee! Refs: {self.ref_brow_neutral}, {self.ref_smile_neutral}")
                     
                     self.current_state = "CALIBRATION"
                     color = (128, 128, 128)
+                
+                # --- PHASE D'ANALYSE ---
                 else:
+                    # 1. Lissage des valeurs pour éviter les tremblements
                     self.smooth_brow = self.alpha * brow_score + (1 - self.alpha) * self.smooth_brow
                     self.smooth_smile = self.alpha * smile_score + (1 - self.alpha) * self.smooth_smile
                     self.smooth_brow_dist = self.alpha * brow_dist_score + (1 - self.alpha) * self.smooth_brow_dist
                     
+                    # 2. Calcul des écarts par rapport au neutre (Relative scores)
                     rel_brow = self.smooth_brow - self.ref_brow_neutral
                     rel_smile = self.smooth_smile - self.ref_smile_neutral
                     rel_brow_dist = self.smooth_brow_dist - self.ref_brow_dist_neutral
                     
+                    # 3. Logique de décision (Heuristiques)
                     detected_state = "NEUTRE"
-                    detected_color = (255, 255, 0)
                     
+                    # Si le sourire augmente de plus de 0.03 par rapport au neutre -> CONTENT
                     if rel_smile > 0.03:
                         detected_state = "CONTENT"
-                        detected_color = (0, 255, 0)
+                    # Si la distance sourcil-oeil diminue significativement -> ENERVE
                     elif rel_brow_dist < -0.010:
                         detected_state = "ENERVE"
-                        detected_color = (0, 0, 255)
                         
+                    # 4. Mécanisme de confirmation (évite les switchs trop rapides)
                     if detected_state == self.potential_state:
+                        # Si l'état détecté est le même que le potentiel depuis X secondes, on valide
                         if time.time() - self.state_start_time > self.STATE_DURATION_THRESHOLD:
                             self.current_state = detected_state
                     else:
+                        # Sinon, on définit un nouvel état potentiel et on reset le timer
                         self.potential_state = detected_state
                         self.state_start_time = time.time()
                         
-                    if self.current_state == "ENERVE": color = (0, 0, 255)
-                    elif self.current_state == "CONTENT": color = (0, 255, 0)
-                    else: color = (255, 255, 0)
+                    # Choix de la couleur d'affichage selon l'état final
+                    if self.current_state == "ENERVE": color = (0, 0, 255) # Rouge
+                    elif self.current_state == "CONTENT": color = (0, 255, 0) # Vert
+                    else: color = (255, 255, 0) # Cyan/Jaune
                     
+                    # Affichage du texte principal
                     cv2.putText(image, f'Etat: {self.current_state}', (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
                     
-                    # Debug
+                    # --- DEBUG INFO ---
+                    # Affiche les valeurs numériques pour ajuster les seuils si besoin
                     cv2.putText(image, f'B-Dist: {self.smooth_brow_dist:.3f} (Rel: {rel_brow_dist:.3f})', (30, 90), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
                     cv2.putText(image, f'Smile: {self.smooth_smile:.2f} (Rel: {rel_smile:.2f})', (30, 110), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-                # Draw
-                draw_metric_lines(image, landmarks, LEFT_EYE, w_img, h_img, (0, 255, 255))
-                draw_metric_lines(image, landmarks, RIGHT_EYE, w_img, h_img, (0, 255, 255))
-                draw_metric_lines(image, landmarks, MOUTH, w_img, h_img, (0, 100, 255))
+                # Dessin des points de repère sur l'image
+                draw_metric_lines(image, p_obj, LEFT_EYE, w_img, h_img, (0, 255, 255))
+                draw_metric_lines(image, p_obj, RIGHT_EYE, w_img, h_img, (0, 255, 255))
+                draw_metric_lines(image, p_obj, MOUTH, w_img, h_img, (0, 100, 255))
                 
-                # Primary emotion for the response (backward compatibility)
+                # On remplit le dictionnaire de retour pour l'API backend
                 metrics['emotion'] = self.current_state
                 
         return image, metrics
