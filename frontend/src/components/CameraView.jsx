@@ -4,13 +4,13 @@ import './CameraView.css';
 const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQuestion, onVLMResponse, temperature, primaryEmotion }) => {
   // Afficher l'émotion du détecteur primary (FER): 'confortable' ou 'inconfortable'
   // Capitaliser la première lettre pour l'affichage
-  const emotionLabel = primaryEmotion 
+  const emotionLabel = primaryEmotion
     ? primaryEmotion.charAt(0).toUpperCase() + primaryEmotion.slice(1)
     : '';
-  
+
   // Debug
   console.log('CameraView primaryEmotion:', { primaryEmotion, emotionLabel });
-  
+
   return (
     <div className="camera-container">
       {error ? (
@@ -32,17 +32,17 @@ const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQu
               muted
               className="video-feed"
             />
-            
+
             {/* Image annotée avec masque géométrique en overlay */}
             {annotatedImage && (
-              <img 
-                src={annotatedImage} 
-                alt="Annotated" 
+              <img
+                src={annotatedImage}
+                alt="Annotated"
                 className="annotated-overlay"
                 style={{ opacity: 0.9 }}
               />
             )}
-            
+
             {/* Indicateur de confort/inconfort en haut à gauche */}
             {primaryEmotion && (
               <div className="comfort-indicator">
@@ -54,7 +54,7 @@ const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQu
             {typeof temperature === 'number' && (
               <div className="temperature-indicator">
                 <div className="temp-gauge-mini">
-                  <div 
+                  <div
                     className="temp-gauge-mini-fill"
                     style={{ height: `${(temperature / 50) * 100}%` }}
                   />
@@ -86,7 +86,7 @@ const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQu
               </div>
             )}
           </div>
-          
+
           {/* Canvas caché pour capture RF-DETR */}
           <canvas ref={canvasRef} style={{ display: 'none' }} />
         </>

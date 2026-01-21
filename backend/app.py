@@ -42,7 +42,7 @@ def process_frame():
         # Encode back
         annotated_image_b64 = encode_image(annotated_frame)
         
-        emotion = metrics.get('emotion', 'NEUTRE')
+        emotion = metrics.get('emotion', 'PAS DE VISAGE')
         
         # Temperature logic based on emotion (simple example)
         # If ENERVE, lower temp? If CONTENT, ?
