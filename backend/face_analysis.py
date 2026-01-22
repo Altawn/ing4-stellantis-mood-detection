@@ -37,9 +37,8 @@ ALL_POINTS = LEFT_EYE + RIGHT_EYE + MOUTH + LEFT_EYEBROW_EXTREMES + RIGHT_EYEBRO
 def calcul_distance(p1, p2):
     return math.dist((p1.x, p1.y), (p2.x, p2.y))
 
-"""Calcule le ratio d'aspect (EAR pour yeux, MAR pour bouche). Le ratio compare la hauteur moyenne des points verticaux par rapport à la largeur. 
-Si le ratio diminue, l'oeil se ferme. Si le MAR augmente, la bouche s'ouvre."""
-def calcul_EAR_MAR(p_obj, i):
+"""Calcule le ratio d'aspect (EAR pour yeux, MAR pour bouche)."""
+def _calculate_aspect_ratio(p_obj, i):
 
     # Distance verticale - Haut 1 et Bas 2
     v1 = calcul_distance(p_obj[i[1]], p_obj[i[5]])
@@ -53,28 +52,41 @@ def calcul_EAR_MAR(p_obj, i):
     # Formule standard: moyenne des hauteurs divisée par la largeur
     return (v1 + v2) / (2.0 * h) if h != 0 else 0.0
 
-"""Calcule l'inclinaison des sourcils. Plus le score est négatif, plus les sourcils pointent vers le bas (froncement)."""
-def calculate_brow_inclination(p_obj, scale_ref):
-    
+""" --- SECTION YEUX --- """
+"""Calcule les métriques des yeux (actuellement EAR)."""
+def calculate_eye_metrics(p_obj):
+    ear_l = _calculate_aspect_ratio(p_obj, LEFT_EYE)
+    ear_r = _calculate_aspect_ratio(p_obj, RIGHT_EYE)
+    return (ear_l + ear_r) / 2.0
+
+"""Calcule à la fois l'inclinaison des sourcils et la distance sourcils-yeux. Retourne (inclination_score, proximity_score)."""
+def calculate_brow_metrics(p_obj, scale_ref):
+    # 1. Inclinaison (Brow Inclination)
     # Distance intérieur extérieur
     l_slope = p_obj[LEFT_EYEBROW_EXTREMES[1]].y - p_obj[LEFT_EYEBROW_EXTREMES[0]].y
     r_slope = p_obj[RIGHT_EYEBROW_EXTREMES[1]].y - p_obj[RIGHT_EYEBROW_EXTREMES[0]].y
     avg_slope = (l_slope + r_slope) / 2.0
 
     # Normalisation par rapport à la taille du visage (scale_ref)
-    sensitivity = 0.08 
-    return max(-1.0, min(1.0, avg_slope / (sensitivity * scale_ref)))
+    sensitivity = 0.08 #Valeur permettant d'avoir la aprfaite inclinaison des sourcils, par rapport à moi en tout cas
+    inclination_score = max(-1.0, min(1.0, avg_slope / (sensitivity * scale_ref)))
 
-"""Calcule la distance entre les sourcils et les yeux. Une réduction de cette distance est souvent signe de colère ou de concentration intense."""
-def calculate_brow_eye_distance(p_obj, scale_ref):
+    # 2. Distance Sourcils-Yeux (Brow-Eye Distance)
     # Distance entre le coin interne de l'oeil et le coin interne du sourcil
     l_dist = calcul_distance(p_obj[362], p_obj[55])
     r_dist = calcul_distance(p_obj[133], p_obj[285])
     avg_dist = (l_dist + r_dist) / 2.0
-    return avg_dist / scale_ref
+    proximity_score = avg_dist / scale_ref
+    
+    return inclination_score, proximity_score
 
-"""Détecte le sourire en mesurant l'élévation des coins de la bouche par rapport au centre de la lèvre supérieure."""
-def calculate_smile_score(p_obj, scale_ref):
+""" --- SECTION BOUCHE --- """
+"""Calcule les métriques de la bouche (MAR et Sourire). Retourne (smile_score, mar_score)."""
+def calculate_mouth_metrics(p_obj, scale_ref):
+    # 1. MAR (Mouth Aspect Ratio)
+    mar_score = _calculate_aspect_ratio(p_obj, MOUTH)
+    
+    # 2. Score Sourire (Smile)
     corner_l = p_obj[MOUTH_CORNERS[0]]
     corner_r = p_obj[MOUTH_CORNERS[1]]
     center_top = p_obj[MOUTH_CENTER_TOP]
@@ -82,12 +94,11 @@ def calculate_smile_score(p_obj, scale_ref):
     # Moyenne de la hauteur des coins
     avg_corner_y = (corner_l.y + corner_r.y) / 2.0
     # Différence avec le centre (si les coins montent, diff augmente positivement car y descend)
-    # Attention: en image y=0 est en haut, donc si un point monte, son y diminue.
     diff = center_top.y - avg_corner_y
     raw_score = diff / scale_ref
     
     sensitivity_bias = 0.02 
-    return raw_score + sensitivity_bias
+    return raw_score + sensitivity_bias, mar_score
 
 """Dessine les lignes de mesure sur l'image (pour le debug/feedback visuel)."""
 def draw_metric_lines(image, p_obj, indices, w_img, h_img, color=(0, 255, 0)):
@@ -164,9 +175,9 @@ class FaceAnalyzer:
             if eye_span == 0: eye_span = 1
             
             # Calcul des scores bruts
-            brow_score = calculate_brow_inclination(p_obj, eye_span)
-            brow_dist_score = calculate_brow_eye_distance(p_obj, eye_span)
-            smile_score = calculate_smile_score(p_obj, eye_span)
+            brow_score, brow_dist_score = calculate_brow_metrics(p_obj, eye_span)
+            smile_score, mar_score = calculate_mouth_metrics(p_obj, eye_span)
+            # eye_score = calculate_eye_metrics(p_obj) # Disponible si besoin
 
             rel_brow = 0.0
             rel_smile = 0.0
