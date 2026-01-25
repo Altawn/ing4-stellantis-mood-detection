@@ -164,7 +164,12 @@ class FaceAnalyzer:
         # Conversion BGR (OpenCV) vers RGB (MediaPipe)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False # Optimisation performance
-        results = self.face_mesh.process(image_rgb)
+        try :  #version qui ignore le flux temporel de l'image si besoin pour éviter bug lié au temps de l'image egal ou inférieur à la précédente 
+            results = self.face_mesh.process(image_rgb)
+        except Exception as e:
+            print(f"Erreur de Mediapipe : {e}")
+            return image, {}
+
         image_rgb.flags.writeable = True
         
         h_img, w_img, _ = image.shape
@@ -271,7 +276,7 @@ class FaceAnalyzer:
                 else:
                     self.mouth_open_start = None
 
-                if rel_brow_dist < -0.01 : #si sourcils proches des yeux et bouche crispée
+                if rel_brow_dist < -0.012 : #si sourcils proches des yeux et bouche crispée
                     detected_state = "INCONFORT"
 
 
