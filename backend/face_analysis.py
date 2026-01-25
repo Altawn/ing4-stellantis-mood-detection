@@ -120,7 +120,7 @@ class FaceAnalyzer:
             max_num_faces=1,                # On n'analyse qu'un seul visage
             refine_landmarks=True,          # Active le suivi précis (iris, lèvres)
             min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.5,
         )
 
         # Paramètres de Calibration
@@ -154,6 +154,10 @@ class FaceAnalyzer:
         self.state_start_time = 0.0
         self.STATE_DURATION_THRESHOLD = 0.3 # 300ms de stabilité requis
 
+        self.eye_closed_start = None
+        self.mouth_open_start = None
+        self.fatigue_score = 0
+
     def process(self, image):
         """Fonction principale traitant une frame image."""
         
@@ -178,6 +182,8 @@ class FaceAnalyzer:
             brow_score, brow_dist_score = calculate_brow_metrics(p_obj, eye_span)
             smile_score, mar_score = calculate_mouth_metrics(p_obj, eye_span)
             # eye_score = calculate_eye_metrics(p_obj) # Disponible si besoin
+
+            avg_ear = calculate_eye_metrics(p_obj)
 
             rel_brow = 0.0
             rel_smile = 0.0
@@ -220,6 +226,8 @@ class FaceAnalyzer:
                 rel_smile = self.smooth_smile - self.ref_smile_neutral
                 rel_brow_dist = self.smooth_brow_dist - self.ref_brow_dist_neutral
                 
+                #Ancienne logique de décision pour émotions
+                '''
                 # 3. Logique de décision (Heuristiques)
                 detected_state = "NEUTRE"
                 
@@ -239,7 +247,43 @@ class FaceAnalyzer:
                     # Sinon, on définit un nouvel état potentiel et on reset le timer
                     self.potential_state = detected_state
                     self.state_start_time = time.time()
-                
+                '''
+
+                #Nouvelle logique de décision pour états physiologiques (fatigue et inconfort)
+
+                detected_state = "NEUTRE"
+
+                #detection somnolence
+                if avg_ear < 0.2: #si petits yeux ou fermés
+                    if self.eye_closed_start is None:
+                        self.eye_closed_start = time.time()
+                    elif time.time() - self.eye_closed_start > 0.5:  # pendant plus de 0.5 secondes
+                        detected_state = "SOMNOLENCE"   
+                else :
+                    self.eye_closed_start = None
+
+                #detection Baillement
+                if mar_score > 0.5 : #bouche grande ouverte
+                    if self.mouth_open_start is None:
+                        self.mouth_open_start = time.time()
+                    elif time.time() - self.mouth_open_start > 1.5: #pendant plus de 1.5 secondes
+                        detected_state = "BAILLEMENT"
+                else:
+                    self.mouth_open_start = None
+
+                if rel_brow_dist < -0.01 : #si sourcils proches des yeux et bouche crispée
+                    detected_state = "INCONFORT"
+
+
+                #Mise à jour de l'état avec lissage temporel 
+
+                if detected_state == self.potential_state: #si etat potention et etat detecté sont les memes
+                    if time.time() - self.state_start_time > self.STATE_DURATION_THRESHOLD: #pendant assez de temps
+                        self.current_state = detected_state #alors etat = etat détecté
+                else : 
+                    self.potential_state = detected_state #sinon etat potentiel devient etat detecté 
+                    self.state_start_time = time.time() #et on reset le timer
+
                 # --- DEBUG INFO ---
                 # Affiche les valeurs numériques pour ajuster les seuils si besoin
                 # cv2.putText(image, f'B-Dist: {self.smooth_brow_dist:.3f} (Rel: {rel_brow_dist:.3f})', (30, 90), 
