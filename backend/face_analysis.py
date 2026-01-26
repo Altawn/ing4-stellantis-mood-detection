@@ -236,29 +236,6 @@ class FaceAnalyzer:
                 rel_brow = self.smooth_brow - self.ref_brow_neutral
                 rel_smile = self.smooth_smile - self.ref_smile_neutral
                 rel_brow_dist = self.smooth_brow_dist - self.ref_brow_dist_neutral
-                
-                #Ancienne logique de décision pour émotions
-                '''
-                # 3. Logique de décision (Heuristiques)
-                detected_state = "NEUTRE"
-                
-                # Si le sourire augmente de plus de 0.03 par rapport au neutre -> CONTENT
-                if rel_smile > 0.03:
-                    detected_state = "CONTENT"
-                # Si la distance sourcil-oeil diminue significativement -> ENERVE
-                elif rel_brow_dist < -0.010:
-                    detected_state = "ENERVE"
-                    
-                # 4. Mécanisme de confirmation (évite les switchs trop rapides)
-                if detected_state == self.potential_state:
-                    # Si l'état détecté est le même que le potentiel depuis X secondes, on valide
-                    if time.time() - self.state_start_time > self.STATE_DURATION_THRESHOLD:
-                        self.current_state = detected_state
-                else:
-                    # Sinon, on définit un nouvel état potentiel et on reset le timer
-                    self.potential_state = detected_state
-                    self.state_start_time = time.time()
-                '''
 
                 #Nouvelle logique de décision pour états physiologiques (fatigue et inconfort)
 
