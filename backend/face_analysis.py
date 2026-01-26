@@ -68,7 +68,7 @@ def calculate_brow_metrics(p_obj, scale_ref):
     avg_slope = (l_slope + r_slope) / 2.0
 
     # Normalisation par rapport à la taille du visage (scale_ref)
-    sensitivity = 0.08 #Valeur permettant d'avoir la aprfaite inclinaison des sourcils, par rapport à moi en tout cas
+    sensitivity = 0.1 #Valeur permettant d'avoir la aprfaite inclinaison des sourcils, par rapport à moi en tout cas
     inclination_score = max(-1.0, min(1.0, avg_slope / (sensitivity * scale_ref)))
 
     # 2. Distance Sourcils-Yeux (Brow-Eye Distance)
@@ -93,6 +93,7 @@ def calculate_mouth_metrics(p_obj, scale_ref):
     
     # Moyenne de la hauteur des coins
     avg_corner_y = (corner_l.y + corner_r.y) / 2.0
+    
     # Différence avec le centre (si les coins montent, diff augmente positivement car y descend)
     diff = center_top.y - avg_corner_y
     raw_score = diff / scale_ref
@@ -133,11 +134,13 @@ class FaceAnalyzer:
         self.calib_brow_vals = []
         self.calib_smile_vals = []
         self.calib_brow_dist_vals = []
+        self.calib_ear_vals = [] # Nouvelle liste pour les yeux
         
         # Valeurs de référence (le "neutre" de l'utilisateur)
         self.ref_brow_neutral = 0.0
         self.ref_smile_neutral = 0.0
         self.ref_brow_dist_neutral = 0.0
+        self.ref_ear_neutral = 0.4  # Valeur par défaut avant calibration
         
         # Paramètres de Lissage (Exponential Moving Average)
         # alpha = 0.2 signifie que la nouvelle valeur compte pour 20%, l'ancienne pour 80%
@@ -206,6 +209,7 @@ class FaceAnalyzer:
                 self.calib_brow_vals.append(brow_score)
                 self.calib_smile_vals.append(smile_score)
                 self.calib_brow_dist_vals.append(brow_dist_score)
+                self.calib_ear_vals.append(avg_ear) # Sauvegarde de l'ouverture des yeux
                 
                 # Fin de calibration
                 if elapsed >= self.CALIBRATION_DURATION:
@@ -214,6 +218,8 @@ class FaceAnalyzer:
                         self.ref_brow_neutral = sum(self.calib_brow_vals) / len(self.calib_brow_vals)
                         self.ref_smile_neutral = sum(self.calib_smile_vals) / len(self.calib_smile_vals)
                         self.ref_brow_dist_neutral = sum(self.calib_brow_dist_vals) / len(self.calib_brow_dist_vals)
+                        self.ref_ear_neutral = sum(self.calib_ear_vals) / len(self.calib_ear_vals)
+                    print(f"Calibration Terminee! Refs EAR: {self.ref_ear_neutral:.3f}")
                     print(f"Calibration Terminee! Refs: {self.ref_brow_neutral}, {self.ref_smile_neutral}")
                 
                 self.current_state = "CALIBRATION"
@@ -258,8 +264,12 @@ class FaceAnalyzer:
 
                 detected_state = "NEUTRE"
 
-                #detection somnolence
-                if avg_ear < 0.2: #si petits yeux ou fermés
+                # 3. Détection Somnolence
+                # On détecte si l'ouverture des yeux descend en dessous de 80% de l'ouverture normale
+                # OU si elle passe sous un seuil absolu de 0.22 (plus sensible que 0.2)
+                ear_threshold = min(0.22, self.ref_ear_neutral * 0.8)
+                
+                if avg_ear < ear_threshold: 
                     if self.eye_closed_start is None:
                         self.eye_closed_start = time.time()
                     elif time.time() - self.eye_closed_start > 0.5:  # pendant plus de 0.5 secondes
@@ -268,7 +278,7 @@ class FaceAnalyzer:
                     self.eye_closed_start = None
 
                 #detection Baillement
-                if mar_score > 0.5 : #bouche grande ouverte
+                if mar_score > 0.8 : #bouche grande ouverte
                     if self.mouth_open_start is None:
                         self.mouth_open_start = time.time()
                     elif time.time() - self.mouth_open_start > 1.5: #pendant plus de 1.5 secondes
@@ -276,8 +286,10 @@ class FaceAnalyzer:
                 else:
                     self.mouth_open_start = None
 
-                if rel_brow_dist < -0.012 : #si sourcils proches des yeux et bouche crispée
-                    detected_state = "INCONFORT"
+                # 5. Détection Inconfort (uniquement si les yeux sont ouverts)
+                if detected_state == "NEUTRE":
+                    if rel_brow_dist < -0.012 and avg_ear >= ear_threshold: 
+                        detected_state = "INCONFORT"
 
 
                 #Mise à jour de l'état avec lissage temporel 

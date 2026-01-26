@@ -50,10 +50,15 @@ def process_frame():
         # but here we can just do simple reactive temp.
         
         new_temp = current_temp
-        if emotion == "INCONFORT" or emotion == "BAILLEMENT":
+        if emotion == "INCONFORT":
             new_temp = max(16, current_temp - 0.05)
         elif emotion == "NEUTRE":
             pass # Stable temperature for happiness
+        elif emotion == "SOMNOLENCE":
+            if new_temp < 20: 
+                new_temp = current_temp + 0.05
+        elif emotion == "BAILLEMENT":
+            new_temp = min(20, current_temp + 0.05)
         else:
             # Return towards 20?
             if current_temp > 20: new_temp -= 0.1
