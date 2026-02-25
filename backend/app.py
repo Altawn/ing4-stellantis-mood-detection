@@ -36,13 +36,11 @@ def process_frame():
         # Decode
         frame = decode_image(image_data)
         
-        # Process
-        annotated_frame, metrics = analyzer.process(frame)
-        
-        # Encode back
-        annotated_image_b64 = encode_image(annotated_frame)
+        # Process (image non modifiée, on récupère juste les métriques)
+        _, metrics = analyzer.process(frame)
         
         emotion = metrics.get('emotion', 'PAS DE VISAGE')
+        annotations = metrics.get('annotations', {})
         
         # Temperature logic based on emotion (simple example)
         # If ENERVE, lower temp? If CONTENT, ?
@@ -67,7 +65,7 @@ def process_frame():
         return jsonify({
             "emotion": emotion,
             "primary_emotion": emotion,
-            "annotated_image": annotated_image_b64,
+            "annotations": annotations,
             "temperature": round(new_temp, 2)
         })
         

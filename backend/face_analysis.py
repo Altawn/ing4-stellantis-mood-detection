@@ -117,9 +117,13 @@ class FaceAnalyzer:
     def __init__(self):
         # Initialisation de MediaPipe Face Mesh
         self.mp_face_mesh = mp.solutions.face_mesh
+        # static_image_mode=True : chaque frame est traitée indépendamment,
+        # sans suivi temporel. Indispensable quand les frames arrivent via HTTP
+        # (ordre non garanti → timestamps non monotones → crash MediaPipe sinon).
         self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,                # On n'analyse qu'un seul visage
-            refine_landmarks=True,          # Active le suivi précis (iris, lèvres)
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
         )
@@ -167,10 +171,18 @@ class FaceAnalyzer:
         # Conversion BGR (OpenCV) vers RGB (MediaPipe)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image_rgb.flags.writeable = False # Optimisation performance
-        try :  #version qui ignore le flux temporel de l'image si besoin pour éviter bug lié au temps de l'image egal ou inférieur à la précédente 
+        try:
             results = self.face_mesh.process(image_rgb)
         except Exception as e:
             print(f"Erreur de Mediapipe : {e}")
+            # Réinitialise le graphe en cas d'état corrompu (filet de sécurité)
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                static_image_mode=True,
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
             return image, {}
 
         image_rgb.flags.writeable = True
@@ -285,11 +297,13 @@ class FaceAnalyzer:
                 # cv2.putText(image, f'Smile: {self.smooth_smile:.2f} (Rel: {rel_smile:.2f})', (30, 110), 
                 #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-            # Dessin des points de repère sur l'image
-            draw_metric_lines(image, p_obj, LEFT_EYE, w_img, h_img, (0, 255, 255))
-            draw_metric_lines(image, p_obj, RIGHT_EYE, w_img, h_img, (0, 255, 255))
-            draw_metric_lines(image, p_obj, MOUTH, w_img, h_img, (0, 100, 255))
-            
+            # Retourner les coordonnées normalisées (0-1) pour le canvas frontend
+            metrics['annotations'] = {
+                'left_eye':  [[p_obj[i].x, p_obj[i].y] for i in LEFT_EYE],
+                'right_eye': [[p_obj[i].x, p_obj[i].y] for i in RIGHT_EYE],
+                'mouth':     [[p_obj[i].x, p_obj[i].y] for i in MOUTH],
+            }
+
             # On remplit le dictionnaire de retour pour l'API backend
             metrics['emotion'] = self.current_state
         return image, metrics
