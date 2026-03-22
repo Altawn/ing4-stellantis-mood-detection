@@ -10,7 +10,7 @@ function App() {
   const [temperature, setTemperature] = useState(20);
   const temperatureRef = useRef(temperature);
   const [currentEmotion, setCurrentEmotion] = useState('');
-  const [annotatedImage, setAnnotatedImage] = useState(null);
+  const [annotations, setAnnotations] = useState(null);
   const [primaryEmotion, setPrimaryEmotion] = useState('');
   const [vlmQuestion, setVlmQuestion] = useState(null);
   const [isWaitingVLM, setIsWaitingVLM] = useState(false);
@@ -30,7 +30,7 @@ function App() {
       const result = await api.sendFrame(frameData, temperatureRef.current);
 
       setCurrentEmotion(result.emotion);
-      setAnnotatedImage(result.annotated_image);
+      setAnnotations(result.annotations || null);
 
       // Debug: voir ce qui arrive du backend
       console.log('Backend result:', result);
@@ -137,7 +137,7 @@ function App() {
         <CameraView
           videoRef={videoRef}
           canvasRef={canvasRef}
-          annotatedImage={annotatedImage}
+          annotatedImage={annotations}
           emotion={currentEmotion}
           error={error}
           vlmQuestion={vlmQuestion}
