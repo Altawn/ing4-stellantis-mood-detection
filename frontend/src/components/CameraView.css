@@ -101,8 +101,41 @@
   font-weight: 600;
   white-space: nowrap;
   min-width: 50px;
-  text-align: left;
+  text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.temp-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.temp-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+  line-height: 1;
+}
+
+.temp-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(1.1);
+}
+
+.temp-btn:active {
+  transform: scale(0.95);
 }
 
 /* Indicateur de confort/inconfort - Style similaire à la température */

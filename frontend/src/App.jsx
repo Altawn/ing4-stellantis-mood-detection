@@ -144,6 +144,9 @@ function App() {
           onVLMResponse={handleVLMResponse}
           temperature={temperature}
           primaryEmotion={primaryEmotion}
+          onManualTempChange={(delta) => {
+            api.changeTemperature(delta).catch(console.error);
+          }}
         />
 
         {/* Slider de température enlevé - la température change automatiquement */}

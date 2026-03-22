@@ -1,7 +1,7 @@
 import React from 'react';
 import './CameraView.css';
 
-const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQuestion, onVLMResponse, temperature, primaryEmotion }) => {
+const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQuestion, onVLMResponse, temperature, primaryEmotion, onManualTempChange }) => {
   // Afficher l'émotion du détecteur primary (FER): 'confortable' ou 'inconfortable'
   // Capitaliser la première lettre pour l'affichage
   const emotionLabel = primaryEmotion
@@ -59,7 +59,11 @@ const CameraView = ({ videoRef, canvasRef, annotatedImage, emotion, error, vlmQu
                     style={{ height: `${(temperature / 50) * 100}%` }}
                   />
                 </div>
-                <span className="temp-value-mini">{temperature.toFixed(1)}°C</span>
+                <div className="temp-controls">
+                  <button className="temp-btn" onClick={() => onManualTempChange && onManualTempChange(-1)}>-</button>
+                  <span className="temp-value-mini">{temperature.toFixed(1)}°C</span>
+                  <button className="temp-btn" onClick={() => onManualTempChange && onManualTempChange(1)}>+</button>
+                </div>
               </div>
             )}
 

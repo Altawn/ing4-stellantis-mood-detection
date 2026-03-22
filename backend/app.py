@@ -3,6 +3,7 @@ from flask_cors import CORS
 import cv2
 import numpy as np
 import base64
+import time
 from face_analysis import FaceAnalyzer
 
 app = Flask(__name__)
@@ -10,6 +11,20 @@ app = Flask(__name__)
 CORS(app)
 
 analyzer = FaceAnalyzer()
+last_secheresse_time = 0
+global_temp = 20.0
+
+@app.route('/api/temperature', methods=['POST'])
+def adjust_temperature():
+    global global_temp
+    try:
+        data = request.json or {}
+        delta = data.get('delta', 0)
+        global_temp += delta
+        return jsonify({"temperature": global_temp})
+    except Exception as e:
+        print(f"Error adjusting temp: {e}")
+        return jsonify({"error": str(e)}), 500
 
 def decode_image(base64_string):
     if ',' in base64_string:
@@ -25,14 +40,16 @@ def encode_image(cv2_img):
 
 @app.route('/api/frame', methods=['POST'])
 def process_frame():
-    data = request.json
-    image_data = data.get('image')
-    current_temp = data.get('temperature', 20)
+    global last_secheresse_time
+    global global_temp
     
-    if not image_data:
-        return jsonify({"error": "No image provided"}), 400
-
     try:
+        data = request.json or {}
+        image_data = data.get('image')
+        
+        if not image_data:
+            return jsonify({"error": "No image provided"}), 400
+
         # Decode
         frame = decode_image(image_data)
         
@@ -49,26 +66,27 @@ def process_frame():
         # App.jsx comments: "backend gérera l'ajustement progressif" for VLM, 
         # but here we can just do simple reactive temp.
         
-        new_temp = current_temp
         if emotion == "INCONFORT":
-            new_temp = max(16, current_temp - 0.05)
+            global_temp = max(16.0, global_temp - 0.05)
         elif emotion == "NEUTRE":
             pass # Stable temperature for happiness
         elif emotion == "SOMNOLENCE":
-            if new_temp < 20: 
-                new_temp = current_temp + 0.05
+            if global_temp < 20.0: 
+                global_temp += 0.05
         elif emotion == "BAILLEMENT":
-            new_temp = min(20, current_temp + 0.05)
-        else:
-            # Return towards 20?
-            if current_temp > 20: new_temp -= 0.1
-            elif current_temp < 20: new_temp += 0.1
+            global_temp = min(20.0, global_temp + 0.05)
+        elif emotion == "SÉCHERESSE OCULAIRE":
+            if time.time() - last_secheresse_time > 5.0:
+                print(f"[APP] Sécheresse Oculaire active. Ancienne temp: {global_temp}")
+                global_temp -= 2.0
+                print(f"[APP] Nouvelle temp: {global_temp}")
+                last_secheresse_time = time.time()
             
         return jsonify({
             "emotion": emotion,
             "primary_emotion": emotion,
             "annotated_image": annotated_image_b64,
-            "temperature": round(new_temp, 2)
+            "temperature": round(global_temp, 2)
         })
         
     except Exception as e:

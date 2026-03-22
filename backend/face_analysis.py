@@ -160,6 +160,11 @@ class FaceAnalyzer:
         self.eye_closed_start = None
         self.mouth_open_start = None
         self.fatigue_score = 0
+        
+        # Pour Sécheresse Oculaire
+        self.blink_timestamps = []
+        self.was_eye_closed = False
+        self.secheresse_end_time = 0.0
 
     def process(self, image):
         """Fonction principale traitant une frame image."""
@@ -246,13 +251,33 @@ class FaceAnalyzer:
                 # OU si elle passe sous un seuil absolu de 0.22 (plus sensible que 0.2)
                 ear_threshold = min(0.22, self.ref_ear_neutral * 0.8)
                 
-                if avg_ear < ear_threshold: 
+                is_eye_closed = avg_ear < ear_threshold
+                
+                if is_eye_closed: 
                     if self.eye_closed_start is None:
                         self.eye_closed_start = time.time()
                     elif time.time() - self.eye_closed_start > 0.5:  # pendant plus de 0.5 secondes
                         detected_state = "SOMNOLENCE"   
                 else :
                     self.eye_closed_start = None
+
+                # Detecter clignements (Sécheresse oculaire)
+                current_time = time.time()
+                # Un clignement peut être partiel à 20fps. On utilise le seuil de somnolence (0.22)
+                # ou légèrement plus tolérant (0.85 de la ref) pour capter les clignements rapides.
+                blink_threshold = min(0.24, self.ref_ear_neutral * 0.85)
+                is_blink_state = avg_ear < blink_threshold
+
+                if is_blink_state and not self.was_eye_closed:
+                    self.blink_timestamps.append(current_time)
+                self.was_eye_closed = is_blink_state
+
+                # Nettoyer les clignements vieux de plus de 10 secondes
+                self.blink_timestamps = [t for t in self.blink_timestamps if current_time - t <= 10.0]
+
+                if len(self.blink_timestamps) >= 8: # Abaissé à 8 pour prendre en compte les drops de fps
+                    self.secheresse_end_time = current_time + 3.0 # On maintient l'état pendant 3 secondes
+                    self.blink_timestamps.clear() # Reset pour ne pas redéclencher tout de suite
 
                 #detection Baillement
                 if mar_score > 0.8 : #bouche grande ouverte
@@ -277,6 +302,10 @@ class FaceAnalyzer:
                 else : 
                     self.potential_state = detected_state #sinon etat potentiel devient etat detecté 
                     self.state_start_time = time.time() #et on reset le timer
+
+                # Surcharge par l'état SÉCHERESSE OCULAIRE s'il est actif
+                if time.time() < self.secheresse_end_time:
+                    self.current_state = "SÉCHERESSE OCULAIRE"
 
                 # --- DEBUG INFO ---
                 # Affiche les valeurs numériques pour ajuster les seuils si besoin

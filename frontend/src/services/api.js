@@ -6,12 +6,24 @@ export const api = {
   async sendFrame(imageBase64, temperature) {
     try {
       const response = await axios.post(`${API_BASE_URL}/frame`, {
-        image: imageBase64,
-        temperature: temperature
+        image: imageBase64
+        // temperature: temperature // ignored by backend now
       });
       return response.data;
     } catch (error) {
       console.error('Erreur envoi frame:', error);
+      throw error;
+    }
+  },
+
+  async changeTemperature(delta) {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/temperature`, {
+        delta: delta
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Erreur changement temperature:', error);
       throw error;
     }
   },
